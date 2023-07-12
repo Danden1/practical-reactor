@@ -104,7 +104,8 @@ public class c1_Introduction extends IntroductionBase {
     public void fortune_top_five() {
         Flux<String> serviceResult = fortuneTop5();
 
-        List<String> results = serviceResult.collectList().block(); //todo: change this line only
+        Mono<List<String>> tmpResult = serviceResult.collectList();
+        List<String> results = tmpResult.block(); //todo: change this line only
 
         assertEquals(Arrays.asList("Walmart", "Amazon", "Apple", "CVS Health", "UnitedHealth Group"), results);
         assertTrue(fortuneTop5ServiceIsCalled.get());
@@ -128,11 +129,16 @@ public class c1_Introduction extends IntroductionBase {
         Flux<String> serviceResult = fortuneTop5();
 
         serviceResult
-                .doOnNext(companyList::add)
+                .subscribe(companyList::add)
         //todo: add an operator here, don't use any blocking operator!
         ;
+        serviceResult.subscribe(System.out::println);
+        System.out.println("hi");
 
         Thread.sleep(1000); //bonus: can you explain why this line is needed?
+        //이유는 async라서, 그 시간을 주려는 건가?
+        //주석 처리를 해도 잘 됨. 왜 그러지....?
+        //hi가 맨 마지막에 됨. 이유는 모르겠음. 공식문서에서도 async 이야기가 있는 거 보면, 맞는 듯? 5개가 아닌 size가 커지면 달라질 것 같음.
 
         assertEquals(Arrays.asList("Walmart", "Amazon", "Apple", "CVS Health", "UnitedHealth Group"), companyList);
     }
@@ -152,9 +158,11 @@ public class c1_Introduction extends IntroductionBase {
         AtomicReference<Boolean> serviceCallCompleted = new AtomicReference<>(false);
         CopyOnWriteArrayList<String> companyList = new CopyOnWriteArrayList<>();
 
-        fortuneTop5()
+        fortuneTop5().subscribe(companyList::add, e->{}, ()->serviceCallCompleted.set(true))
         //todo: change this line only
         ;
+
+        //이 부분은 몰라서 답 봄. 중간은 에러 핸들링. 마지막은 onComplete() 관련임.
 
         Thread.sleep(1000);
 
