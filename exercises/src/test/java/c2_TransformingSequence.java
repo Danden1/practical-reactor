@@ -27,6 +27,7 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
     @Test
     public void transforming_sequence() {
         Flux<Integer> numbersFlux = numerical_service()
+                .map(s->s+1)
                 //todo change only this line
                 ;
 
@@ -48,7 +49,35 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
         Flux<Integer> numbersFlux = numerical_service_2();
 
         //todo: do your changes here
-        Flux<String> resultSequence = null;
+        Flux<String> resultSequence = numbersFlux.flatMap(s-> {
+            if( s > 0){
+                return Flux.just(">");
+            }
+            else if(s < 0){
+                return Flux.just("<");
+            }
+            else{
+                return Flux.just("=");
+            }
+        });
+
+        //정답은
+        /*
+        Flux<String> resultSequence = numbersFlux
+                .map(i -> {
+                    if (i > 0) {
+                        return ">";
+                    } else if (i == 0) {
+                        return "=";
+                    } else {
+                        return "<";
+                    }
+            });
+         */
+
+        //하지만 flatMap이 비동기라서 flux -> flux는 이게 좋다고 하는 거 같은데?
+        //만약 비동기면, sleep이 없어도 이상하게 테스트 통과가 됨.
+        //map은 동기, flatMap은 async로 작동한다고 함. 근데 왜 테스트는...?
 
         //don't change code below
         StepVerifier.create(resultSequence)
@@ -65,7 +94,7 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
     @Test
     public void cast() {
         Flux<String> numbersFlux = object_service()
-                .map(i -> (String) i); //todo: change this line only
+                .cast(String.class); //todo: change this line only
 
 
         StepVerifier.create(numbersFlux)
@@ -80,6 +109,7 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
     @Test
     public void maybe() {
         Mono<String> result = maybe_service()
+                .defaultIfEmpty("no results")
                 //todo: change this line only
                 ;
 
@@ -95,8 +125,9 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
     @Test
     public void sequence_sum() {
         //todo: change code as you need
-        Mono<Integer> sum = null;
-        numerical_service();
+        Mono<Integer> sum = numerical_service().reduce(0, Integer::sum);
+        //reduce 소스코드 보면, mono를 return하게 되어 있음.
+        //무슨 메소드를 호출해야할 지 모르겠는데, 알고보니 주석에 나와있음.
 
         //don't change code below
         StepVerifier.create(sum)
@@ -110,9 +141,11 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
      */
     @Test
     public void sum_each_successive() {
-        Flux<Integer> sumEach = numerical_service()
+        Flux<Integer> sumEach = numerical_service().scan(Integer::sum)
                 //todo: do your changes here
                 ;
+        sumEach.subscribe(System.out::println);
+        //scan(0, Integer::sum)은 안됨. 0이 먼저 인자로 들어감.
 
         StepVerifier.create(sumEach)
                     .expectNext(1, 3, 6, 10, 15, 21, 28, 36, 45, 55)
@@ -128,7 +161,7 @@ public class c2_TransformingSequence extends TransformingSequenceBase {
      */
     @Test
     public void sequence_starts_with_zero() {
-        Flux<Integer> result = numerical_service()
+        Flux<Integer> result = numerical_service().startWith(0)
                 //todo: change this line only
                 ;
 
