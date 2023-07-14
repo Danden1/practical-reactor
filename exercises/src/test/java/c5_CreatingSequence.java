@@ -12,6 +12,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import static java.lang.Thread.sleep;
+
 /**
  * In this chapter we are going to cover fundamentals of how to create a sequence. At the end of this
  * chapter we will tackle more complex methods like generate, create, push, and we will meet them again in following
@@ -249,6 +251,41 @@ public class c5_CreatingSequence {
                     .verifyComplete();
     }
 
+
+    //출처 : https://www.vinsguru.com/mono-vs-flux-project-reactor/
+    @Test
+    public void simple_test() throws InterruptedException {
+        System.out.println("Starts");
+        System.out.println("thread id" + Thread.currentThread().getId());
+        //flux emits one element per second
+        Flux<Character> flux =
+                Flux.just('a', 'b', 'c', 'd')
+                .log()
+                .delayElements(Duration.ofSeconds(1));
+        //Observer 1 - takes 500ms to process
+        flux
+                .map(Character::toUpperCase)
+                .subscribe(i -> {
+                    try {
+                        sleep(500);
+                        if(i == 'A'){
+                            sleep(1000);
+                        }
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    System.out.println("Observer-1 : " + i + " thread id" + Thread.currentThread().getId());
+                });
+        //Observer 2 - process immediately
+        flux.subscribe(i -> System.out.println("Observer-2 : " + i+ " thread id" + Thread.currentThread().getId()));
+
+        System.out.println("Ends");
+
+//Just to block the exe
+        Thread.sleep(10000);
+    }
+
+
     /**
      * Following example is just a basic usage of `generate,`create`,`push` sinks. We will learn how to use them in a
      * more complex scenarios when we tackle backpressure.
@@ -257,14 +294,24 @@ public class c5_CreatingSequence {
      * - What is difference between `generate` and `create`?
      *  generate는 sync 기반. create는 async + multi thread.
      * - What is difference between `create` and `push`?
+     *  push는 단일 스레드 async. create는 멀티쓰레드.
      */
+
+
+
+
     @Test
-    public void generate_programmatically() {
+    public void generate_programmatically() throws InterruptedException {
 
         //이 코드가 없었음.
         AtomicInteger counter = new AtomicInteger(0);
 
         Flux<Integer> generateFlux = Flux.generate(sink -> {
+            try {
+                sleep(500);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
             if(counter.get() > 5) {
                 sink.complete();
             }
@@ -272,34 +319,67 @@ public class c5_CreatingSequence {
             //todo: fix following code so it emits values from 0 to 5 and then completes
         });
 
-        //------------------------------------------------------
-        Integer count = 0;
-        //generate는 final로 된 걸 써야하는데 여긴 안 써도 에러가 안뜸.
-        //근데 async면 race condition 일어나지 않나?
-        //integer로 하면 끝나질 않음.
-        //race condition이 발생해서 값을 모르나?
-        // 디버깅해도 모르겠는데?
-        Flux<Integer> createFlux = Flux.create(sink -> {
-            if(count > 5) {
-                sink.complete();
-            }
-            sink.next(count);
-//            정답
-//            for(int i = 0; i <= 5; i++){
-//                sink.next(i);
-//            }
-//            sink.complete();
-            //todo: fix following code so it emits values from 0 to 5 and then completes
-        });
-        System.out.println("end");
-        //------------------------------------------------------
-        Integer countt = 0;
+        //generate test
+//        generateFlux.subscribe(s -> System.out.println("1 thread id " + Thread.currentThread().getId() + " data: " + s));
+//        //2번 째 거는 실행이 안됨. complete 가 발생했기 때문에 block 되어 그런가?
+//        generateFlux.subscribe(s -> System.out.println("2 thread id " + Thread.currentThread().getId() + " data: " + s));
+//        sleep(10000);
 
-        Flux<Integer> pushFlux = Flux.push(sink -> {
-//            if(countt > 5) {
+
+        //------------------------------------------------------
+        AtomicInteger count = new AtomicInteger(0);
+        /*atomic integer로 하면 안되는 거 같음.
+        그냥 next가 호출이 안됨.
+        subscribe를 하면 한 번만 호출하고 끝이남.
+        자동으로 다음으로 넘어갈 생각이 없음.
+
+        하지만 for 문으로 하면 잘됨.
+        문서에 따르면, lambda 내에 블록킹 연산이 있으면 next 파이프라인이 잠길 수 있다고 함.
+        (https://projectreactor.io/docs/core/release/reference/#_simple_ways_to_create_a_flux_or_mono_and_subscribe_to_it)
+        즉, atomic 값을 증가시키려다가 잠기는 듯 함.
+        */
+
+
+        Flux<Integer> createFlux = Flux.create(sink -> {
+//            if(count.get() > 5) {
 //                sink.complete();
 //            }
-//            sink.next(countt);
+//            sink.next(count.getAndIncrement());
+
+
+//            정답
+            for(int i = 0; i <= 5; i++){
+                sink.next(i);
+            }
+            sink.complete();
+            //todo: fix following code so it emits values from 0 to 5 and then completes
+        });
+
+//        얘는 또 다 실행이 됨. 그리고 thread들이 같음..?
+//        앞에서 just를 이용하여 flux를 만들면 다 같게 뜸.
+//        thread가 같으니 sleep해서 async도 못봄
+
+        System.out.println("create");
+        createFlux.subscribe(s -> {
+            try {
+                sleep(200);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            System.out.println("1 thread id " + Thread.currentThread().getId() + " data: " + s);
+        });
+
+        createFlux.subscribe(s -> System.out.println("2 thread id " + Thread.currentThread().getId() + " data: " + s));
+        sleep(5000);
+        //------------------------------------------------------
+        AtomicInteger countt = new AtomicInteger(0);
+
+        Flux<Integer> pushFlux = Flux.push(sink -> {
+//            if(countt.get() > 5) {
+//                sink.complete();
+//            }
+//            sink.next(countt.getAndIncrement());
+
 //                        정답
             for(int i = 0; i <= 5; i++){
                 sink.next(i);
@@ -308,30 +388,48 @@ public class c5_CreatingSequence {
             //todo: fix following code so it emits values from 0 to 5 and then completes
         });
 
+        //create랑 같게 뜸. 흠.. create는 멀티쓰레드 아닌가?
+        System.out.println("push");
+        pushFlux.subscribe(s -> System.out.println("1 thread id " + Thread.currentThread().getId() + " data: " + s));
+        pushFlux.subscribe(s -> System.out.println("2 thread id " + Thread.currentThread().getId() + " data: " + s));
+        sleep(5000);
+
         StepVerifier.create(generateFlux)
                     .expectNext(0, 1, 2, 3, 4, 5)
                     .verifyComplete();
 
+        //출력이 0, 1 이 됨. next가 제대로 안됨?
+        //doOnNext도 출력이 안됨. 그냥 next가 호출이 안되는 거 같음.
+        createFlux.doOnNext(s -> System.out.println("hi"));
+        createFlux.subscribe(System.out::println);
+
         StepVerifier.create(createFlux)
                     .expectNext(0, 1, 2, 3, 4, 5)
                     .verifyComplete();
-
+        System.out.println("test2");
         StepVerifier.create(pushFlux)
                     .expectNext(0, 1, 2, 3, 4, 5)
                     .verifyComplete();
+        System.out.println("test3");
     }
+
+
 
     /**
      * Something is wrong with the following code. Find the bug and fix it so test passes.
      */
     @Test
-    public void multi_threaded_producer() {
+    public void multi_threaded_producer() throws InterruptedException {
         //todo: find a bug and fix it!
-        Flux<Integer> producer = Flux.push(sink -> {
+        //Flux.create가 정답.
+        //왜 push를 하면 무한 루프에 빠지는 지 모르겠음. 데드락 걸리면 아예 출력이 안되어야 하는데, 데이터 몇 개는 또 출력이 됨.
+        Flux<Integer> producer = Flux.create(sink -> {
             for (int i = 0; i < 100; i++) {
                 int finalI = i;
+
                 new Thread(() -> sink.next(finalI)).start(); //don't change this line!
             }
+
         });
 
         //do not change code below
