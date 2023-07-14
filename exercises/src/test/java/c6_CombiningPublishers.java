@@ -40,9 +40,8 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
         Hooks.enableContextLossTracking(); //used for testing - detects if you are cheating!
 
         //todo: feel free to change code as you need
-        Mono<String> currentUserEmail = null;
-        Mono<String> currentUserMono = getCurrentUser();
-        getUserEmail(null);
+        Mono<String> currentUserEmail = getCurrentUser().flatMap(this::getUserEmail);
+//        getUserEmail(null);
 
         //don't change below this line
         StepVerifier.create(currentUserEmail)
@@ -60,8 +59,8 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void task_executor() {
         //todo: feel free to change code as you need
-        Flux<Void> tasks = null;
-        taskExecutor();
+        Flux<Void> tasks = taskExecutor().flatMap(s->s);
+
 
         //don't change below this line
         StepVerifier.create(tasks)
@@ -79,8 +78,8 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void streaming_service() {
         //todo: feel free to change code as you need
-        Flux<Message> messageFlux = null;
-        streamingService();
+        Flux<Message> messageFlux = streamingService().flatMapMany(s->s);
+
 
         //don't change below this line
         StepVerifier.create(messageFlux)
@@ -98,9 +97,8 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void i_am_rubber_you_are_glue() {
         //todo: feel free to change code as you need
-        Flux<Integer> numbers = null;
-        numberService1();
-        numberService2();
+        Flux<Integer> numbers = Flux.concat(numberService1(), numberService2());
+
 
         //don't change below this line
         StepVerifier.create(numbers)
@@ -118,14 +116,22 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
      *
      * Answer:
      * - What is difference between concatMap() and flatMap()?
+     *  concatMap은 순서를 보장해줌. 근데 flatMap은 안해줌.(그럼 위 예제들은 왜 되는 건지 모르겠음)
+     *  https://stackoverflow.com/questions/64905813/is-project-reactor-flatmap-order-sequential 무조건 보장해주는 건 아니라고 함.
+     *  https://medium.com/swlh/understanding-reactors-flatmap-operator-a6a7e62d3e95
+     *
      * - What is difference between concatMap() and flatMapSequential()?
+     * https://stackoverflow.com/questions/71971062/whats-the-difference-between-flatmap-flatmapsequential-and-concatmap-in-project
+     *
      * - Why doesn't Mono have concatMap() operator?
+     * mono는 event가 하나만 가능함.
      */
     @Test
     public void task_executor_again() {
         //todo: feel free to change code as you need
-        Flux<Void> tasks = null;
-        taskExecutor();
+        Flux<Void> tasks = taskExecutor().concatMap(s->s);
+        //앞의 flatMap은 순서가 좀 다르지만, concatMap은 1~10까지 보장함.
+
 
         //don't change below this line
         StepVerifier.create(tasks)
@@ -142,7 +148,7 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void need_for_speed() {
         //todo: feel free to change code as you need
-        Flux<String> stonks = null;
+        Flux<String> stonks = Flux.firstWithValue(getStocksRest(), getStocksGrpc());
         getStocksGrpc();
         getStocksRest();
 
@@ -160,9 +166,7 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void plan_b() {
         //todo: feel free to change code as you need
-        Flux<String> stonks = null;
-        getStocksLocalCache();
-        getStocksRest();
+        Flux<String> stonks = getStocksLocalCache().switchIfEmpty(getStocksRest());
 
         //don't change below this line
         StepVerifier.create(stonks)
@@ -179,7 +183,14 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     @Test
     public void mail_box_switcher() {
         //todo: feel free to change code as you need
-        Flux<Message> myMail = null;
+        Flux<Message> myMail = mailBoxPrimary().switchOnFirst((first, mail) -> {
+            if(first.get().metaData.contains("spam")){
+                return mailBoxSecondary();
+            }
+            else{
+                return mail;
+            }
+        });
         mailBoxPrimary();
         mailBoxSecondary();
 
@@ -203,7 +214,7 @@ public class c6_CombiningPublishers extends CombiningPublishersBase {
     public void instant_search() {
         //todo: feel free to change code as you need
         autoComplete(null);
-        Flux<String> suggestions = userSearchInput()
+        Flux<String> suggestions = userSearchInput().switchMap(this::autoComplete)
                 //todo: use one operator only
                 ;
 
