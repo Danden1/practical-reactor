@@ -2,7 +2,9 @@ import org.junit.jupiter.api.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import reactor.util.retry.Retry;
 
+import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -33,7 +35,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void houston_we_have_a_problem() {
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
-        Flux<String> heartBeat = probeHeartBeatSignal()
+        Flux<String> heartBeat = probeHeartBeatSignal().timeout(Duration.ofSeconds(3))
+                .doOnError(errorRef::set)
                 //todo: do your changes here
                 //todo: & here
                 ;
@@ -53,7 +56,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      */
     @Test
     public void potato_potato() {
-        Mono<String> currentUser = getCurrentUser()
+        Mono<String> currentUser = getCurrentUser().onErrorMap(SecurityException::new)
                 //todo: change this line only
                 //use SecurityException
                 ;
@@ -70,7 +73,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      */
     @Test
     public void under_the_rug() {
-        Flux<String> messages = messageNode();
+        Flux<String> messages = messageNode().onErrorResume(s-> Mono.empty());
         //todo: change this line only
         ;
 
@@ -86,9 +89,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void have_a_backup() {
         //todo: feel free to change code as you need
-        Flux<String> messages = null;
-        messageNode();
-        backupMessageNode();
+        Flux<String> messages = messageNode().onErrorResume(s -> backupMessageNode());
 
         //don't change below this line
         StepVerifier.create(messages)
@@ -103,8 +104,12 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void error_reporter() {
         //todo: feel free to change code as you need
-        Flux<String> messages = messageNode();
-        errorReportService(null);
+
+        //errorReportService가 호출이 되지 않아서 errorReported()의 값이 설정되지 않음.
+        //하지만 Mono<String> 형태를 반환하나봄.... 왜지... 자바를 좀 더 공부해야하나(특히 generic)
+//        Flux<String> messages = messageNode().onErrorResume(s->Mono.error(s));
+
+        Flux<String> messages = messageNode().onErrorResume(s->errorReportService(s).then(Mono.error(s)));
 
         //don't change below this line
         StepVerifier.create(messages)
@@ -121,7 +126,13 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      */
     @Test
     public void unit_of_work() {
-        Flux<Task> taskFlux = taskQueue()
+        //map 은 새로운 publisher를 만드는 것? subscribe는 단순히 소비? 흠
+        Flux<Task> taskFlux = taskQueue().flatMap(s->
+            s.execute()
+            .then(s.commit())
+            .onErrorResume(s::rollback)
+            .thenReturn(s)
+        )
                 //todo: do your changes here
                 ;
 
@@ -140,6 +151,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     public void billion_dollar_mistake() {
         Flux<String> content = getFilesContent()
                 .flatMap(Function.identity())
+                .onErrorContinue((e,o) -> {})
                 //todo: change this line only
                 ;
 
@@ -161,15 +173,21 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      * by using knowledge gained from previous lessons.
      */
     @Test
-    public void resilience() {
+    public void resilience() throws InterruptedException {
         //todo: change code as you need
         Flux<String> content = getFilesContent()
-                .flatMap(Function.identity()); //start from here
+                .flatMap(s->s.onErrorResume(e->Mono.empty()))
+        // .onErrorResume(...) 여기로 옮기면 안됨. 파일 2에서 예외가 발생하고, 파일3으로 넘어가지 않는 현상이 발생함.
+        // 그 이유는 s는 mono임. 즉, mono에서 error가 뜨면, 단순히 그 부분을 empty Mono로 대체하고 다음 Mono를 실행하게 됨.
+        // 하지만 flux에 onErrorResume을 하게 된다면, 다음인 파일 3으로 넘어가지 않음. 파일 2에서 에러가 떴기 때문에 이를 빈 mono가 대체하게 됨.
+
+                ; //start from here
 
         //don't change below this line
         StepVerifier.create(content)
                     .expectNext("file1.txt content", "file3.txt content")
                     .verifyComplete();
+
     }
 
     /**
@@ -178,7 +196,8 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
      */
     @Test
     public void its_hot_in_here() {
-        Mono<Integer> temperature = temperatureSensor()
+        Mono<Integer> temperature = temperatureSensor().retry();
+
                 //todo: change this line only
                 ;
 
@@ -195,6 +214,7 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void back_off() {
         Mono<String> connection_result = establishConnection()
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(5)))
                 //todo: change this line only
                 ;
 
@@ -211,7 +231,12 @@ public class c7_ErrorHandling extends ErrorHandlingBase {
     @Test
     public void good_old_polling() {
         //todo: change code as you need
-        Flux<String> alerts = null;
+        //empty일 때 이 안의 publisher가 실행됨.
+        //즉 비어있으면 몇 초 기다리거나 이런 식으로 수행할 수 있음. 근데 데이터 들어와서 읽게 되면?
+        //complete되고 종료되는 거 같음.
+        Flux<String> alerts = nodeAlerts().repeatWhenEmpty(it -> it.delayElements(Duration.ofSeconds(5)))
+                .repeat();
+        ;
         nodeAlerts();
 
         //don't change below this line
