@@ -24,6 +24,18 @@ import java.util.List;
  *
  * @author Stefan Dragisic
  */
+
+/*
+sink는 signal을 trigger함.
+sink.next(data)를 하면, 이 sink를 구독하고 있는 subscriber들에게 데이터가 날아아게 됨.
+
+그리고 flux는 sink를 통해 데이터를 전달하나?
+-> Flux.generate를 보면, sync sink를 통해서 데이터를 전달함.
+
+sub도 아닌데 pub가 sync와 aysnc의 차이가 있는지 궁금함.
+-> 여러 sub에게 데이터를 보내지 못하나?
+-> 내부에 다른 thred를 이용한 작업이 있다면 그냥 그 부분이 실행이 잘 안 되는 듯 함. 자세히 알아봐야하는데......
+ */
 public class c8_Sinks extends SinksBase {
 
     /**
@@ -34,10 +46,13 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void single_shooter() {
         //todo: feel free to change code as you need
-        Mono<Boolean> operationCompleted = null;
+        Sinks.One<Boolean> sink = Sinks.one();
+        Mono<Boolean> operationCompleted = sink.asMono();
         submitOperation(() -> {
 
             doSomeWork(); //don't change this line
+            sink.tryEmitValue(true);
+
         });
 
         //don't change code below
@@ -55,10 +70,16 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void single_subscriber() {
         //todo: feel free to change code as you need
-        Flux<Integer> measurements = null;
+        //unicast대신 multicast를 써도 잘 됨. 왜? sub이 하나라서?
+
+        //sinks.many는 buffer를 통해 backpressure를 관리할 수 있음.
+        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer();
+        Flux<Integer> measurements = sink.asFlux();
         submitOperation(() -> {
 
             List<Integer> measures_readings = get_measures_readings(); //don't change this line
+            measures_readings.forEach(sink::tryEmitNext);
+            sink.tryEmitComplete();
         });
 
         //don't change code below
@@ -66,6 +87,22 @@ public class c8_Sinks extends SinksBase {
                                     .delaySubscription(Duration.ofSeconds(6)))
                     .expectNext(0x0800, 0x0B64, 0x0504)
                     .verifyComplete();
+
+        submitOperation(() -> {
+
+            List<Integer> measures_readings = get_measures_readings(); //don't change this line
+            measures_readings.forEach(sink::tryEmitNext);
+            sink.tryEmitComplete();
+        });
+
+
+//        failed (expected: onNext(2048); actual: onError(java.lang.IllegalStateException: UnicastProcessor allows only a single Subscriber))
+        //unicast는 sub이 하나만 가능한 듯 함. unicast를 multi로 바꾸면 다른 에러가 뜸. 이미 oncomplete되었다고 함....
+        //crate나 push처럼 새로운 sub이 등록될 때마다 데이터를 만들어 주는 건 아닌 거 같음?
+//        StepVerifier.create(measurements
+//                        .delaySubscription(Duration.ofSeconds(6)))
+//                .expectNext(0x0800, 0x0B64, 0x0504)
+//                .verifyComplete();
     }
 
     /**
@@ -75,13 +112,20 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void it_gets_crowded() {
         //todo: feel free to change code as you need
-        Flux<Integer> measurements = null;
+        //버퍼 사이즈 1로 해도 잘 되는데? 왜 reject가 안됨?
+        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer();
+        Flux<Integer> measurements = sink.asFlux();
         submitOperation(() -> {
 
             List<Integer> measures_readings = get_measures_readings(); //don't change this line
+            measures_readings.forEach(sink::tryEmitNext);
+            sink.tryEmitComplete();
         });
 
         //don't change code below
+        //complete이 안 되면, 무한 로딩.
+        //이 부분이 왜 subs가 2개 이상인지?
+        //ignoreElments하나와 delaySubscription 하나?
         StepVerifier.create(Flux.merge(measurements
                                                .delaySubscription(Duration.ofSeconds(1)),
                                        measurements.ignoreElements()))
@@ -98,7 +142,10 @@ public class c8_Sinks extends SinksBase {
     @Test
     public void open_24_7() {
         //todo: set autoCancel parameter to prevent sink from closing
-        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer();
+        //버퍼 사이즈 1로 하면 실패함. 왜?
+        //-> 버퍼가 차면 sink가 데이터를 push하는 것을rejct한다고 함.
+        Sinks.Many<Integer> sink = Sinks.many().multicast().onBackpressureBuffer(2, false);
+
         Flux<Integer> flux = sink.asFlux();
 
         //don't change code below
@@ -120,6 +167,8 @@ public class c8_Sinks extends SinksBase {
                                         .verifyLater();
 
         //subscriber3 subscribes after all previous subscribers have cancelled
+        //버퍼 사이즈를 하나로 하면 여기서 뻑이남. expect next를 할 때 2개까지만 받을 수 있어서 2까지는 됨.
+        //take는 상관 없는 거 같음.
         StepVerifier sub3 = StepVerifier.create(flux.take(3)
                                                     .delaySubscription(Duration.ofSeconds(6)))
                                         .expectNext(0x0B64) //first measurement `0x0800` was already consumed by previous subscribers
@@ -179,16 +228,23 @@ public class c8_Sinks extends SinksBase {
     /**
      * There is a bug in the code below. May multiple producer threads concurrently generate data on the sink?
      * If yes, how? Find out and fix it.
+     * 기존 코드는 50에서 blocking되고 끝나지 않음. complete가 필요함.
+     * 그리고 thread로 해버리면 순서가 보장되지 않음. -> 순서 보장 안되어도 됨. 그냥 50개면 됨.
      */
     @Test
-    public void emit_failure() {
+    public void emit_failure() throws InterruptedException {
         //todo: feel free to change code as you need
         Sinks.Many<Integer> sink = Sinks.many().replay().all();
 
+        //다르게 풀었네...
         for (int i = 1; i <= 50; i++) {
             int finalI = i;
-            new Thread(() -> sink.tryEmitNext(finalI)).start();
+//            new Thread(() -> sink.tryEmitNext(finalI)).start();
+//            sink.tryEmitNext(finalI);
+            new Thread(() -> sink.emitNext(finalI, (signalType, emitResult) -> emitResult
+                    .equals(Sinks.EmitResult.FAIL_NON_SERIALIZED))).start();
         }
+//        sink.tryEmitComplete();
 
         //don't change code below
         StepVerifier.create(sink.asFlux()
