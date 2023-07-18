@@ -3,6 +3,7 @@ import org.reactivestreams.Subscription;
 import reactor.core.Exceptions;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.StepVerifierOptions;
 
@@ -47,6 +48,7 @@ public class c10_Backpressure extends BackpressureBase {
     public void request_and_demand() {
         CopyOnWriteArrayList<Long> requests = new CopyOnWriteArrayList<>();
         Flux<String> messageStream = messageStream1()
+                .doOnRequest(requests::add)
                 //todo: change this line only
                 ;
 
@@ -70,9 +72,44 @@ public class c10_Backpressure extends BackpressureBase {
     @Test
     public void limited_demand() {
         CopyOnWriteArrayList<Long> requests = new CopyOnWriteArrayList<>();
-        Flux<String> messageStream = messageStream2()
+
+        //limitRate가 앞에 오면 안됨. 왜지?
+        //앞에 있으면 기존 flux 에 limit rate가 걸리고 그 다음 doOnRequest를 등록하면 되지 않나?
+        //앞에 있으면 기존 flux에 limitRate가 걸리지 않나봄. 확인필요
+
+        //limitRate하면, publishOn이 적용이 됨. 이 부분이 먼저 나오면 적용이 안되나 봄?
+        //publishOn 부분 그대로 복사해서 앞에 적용해도 안됨.
+        //TODO: publishOn 집에서 공부해야 할 듯.
+
+        /*
+        정답 로그
+        [ INFO] (main) | onSubscribe([Fuseable] FluxPublishOn.PublishOnSubscriber)
+        [ INFO] (main) | request(1)
+        [ INFO] (main) | onNext(msg#1)
+        [ INFO] (main) | request(3)
+        [ INFO] (main) | onNext(msg#2)
+        [ INFO] (main) | onNext(msg#3)
+        [ INFO] (main) | onComplete()
+
+        틀린 로그
+        [ INFO] (main) | onSubscribe([Fuseable] FluxPeekFuseable.PeekFuseableSubscriber)
+        [ INFO] (main) | request(1)
+        [ INFO] (main) | onNext(msg#1)
+        [ INFO] (main) | request(3)
+        [ INFO] (main) | onNext(msg#2)
+        [ INFO] (main) | onNext(msg#3)
+        [ INFO] (main) | onComplete
+
+        subcribe의 스케줄러가 다르긴함.
+        이거 떄문에 문제 발생한 듯.
+         */
+
+
+        Flux<String> messageStream = messageStream2().doOnRequest(requests::add).limitRate(1).log()
                 //todo: do your changes here
                 ;
+
+
 
         StepVerifier.create(messageStream, StepVerifierOptions.create().initialRequest(0))
                     .expectSubscription()
@@ -93,9 +130,20 @@ public class c10_Backpressure extends BackpressureBase {
      */
     @Test
     public void uuid_generator() {
-        Flux<UUID> uuidGenerator = Flux.create(sink -> {
+        Flux<UUID> uuidGenerator = Flux.create(sink ->
             //todo: do your changes here
-        });
+                {
+                    sink.onRequest(req -> {
+                        for (int i = 0; i < req; i++) {
+                            sink.next(UUID.randomUUID());
+                        }
+                    });
+//                    테스트 부분에 thenCancel()이 있어서 무한 루프 돌지 않는 듯.
+//                    sink.complete();
+
+                }
+        );
+
 
         StepVerifier.create(uuidGenerator
                                     .doOnNext(System.out::println)
@@ -115,7 +163,7 @@ public class c10_Backpressure extends BackpressureBase {
      */
     @Test
     public void pressure_is_too_much() {
-        Flux<String> messageStream = messageStream3()
+        Flux<String> messageStream = messageStream3().onBackpressureError().log()
                 //todo: change this line only
                 ;
 
